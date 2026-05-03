@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
+const Jimp = require('jimp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -132,19 +133,29 @@ app.post('/api/analyse', upload.array('photos', 10), async (req, res) => {
       return res.status(400).json({ error: 'No photos uploaded' });
     }
 
-    // Build image content blocks — truncate base64 if over 4MB
-    const MAX_B64_CHARS = 5_000_000; // ~3.75MB raw < 5MB API limit
-    const imageBlocks = req.files.map(file => {
-      let b64 = file.buffer.toString('base64');
-      // If too large, take first portion (Claude will still analyse the visible content)
-      if (b64.length > MAX_B64_CHARS) {
-        b64 = b64.substring(0, MAX_B64_CHARS);
+    // Resize images server-side to stay under 5MB API limit
+    const imageBlocks = await Promise.all(req.files.map(async file => {
+      try {
+        const img = await Jimp.read(file.buffer);
+        // Scale down if wider/taller than 1600px
+        if (img.getWidth() > 1600 || img.getHeight() > 1600) {
+          img.scaleToFit(1600, 1600);
+        }
+        // Export as JPEG at 80% quality
+        const resized = await img.getBufferAsync(Jimp.MIME_JPEG);
+        return {
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: resized.toString('base64') }
+        };
+      } catch (e) {
+        // Fallback: use original but warn
+        console.warn('Could not resize image:', e.message);
+        return {
+          type: 'image',
+          source: { type: 'base64', media_type: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') }
+        };
       }
-      return {
-        type: 'image',
-        source: { type: 'base64', media_type: file.mimetype || 'image/jpeg', data: b64 }
-      };
-    });
+    }));
 
     const client = getClient();
     const response = await client.messages.create({
