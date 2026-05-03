@@ -7,7 +7,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Helper to get a fresh client per request
+function getClient() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('ANTHROPIC_API_KEY environment variable is not set in Railway Variables');
+  return new Anthropic({ apiKey: key });
+}
 
 // Multer - store in memory for direct base64 conversion
 const upload = multer({
@@ -137,6 +142,7 @@ app.post('/api/analyse', upload.array('photos', 10), async (req, res) => {
       }
     }));
 
+    const client = getClient();
     const response = await client.messages.create({
       model: 'claude-opus-4-5',
       max_tokens: 1024,
@@ -199,6 +205,7 @@ ${sectionText}
 
 Write 2-3 paragraphs covering: overall fire safety status, key deficiencies found, and general recommendations. Use formal FRA report language. Do not use markdown formatting - plain paragraphs only.`;
 
+    const client = getClient();
     const response = await client.messages.create({
       model: 'claude-opus-4-5',
       max_tokens: 600,
@@ -214,6 +221,15 @@ Write 2-3 paragraphs covering: overall fire safety status, key deficiencies foun
   }
 });
 
+// Key check endpoint — visit /api/keycheck to verify API key is set
+app.get('/api/keycheck', (req, res) => {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return res.json({ ok: false, message: 'ANTHROPIC_API_KEY is NOT set' });
+  res.json({ ok: true, message: `Key found — starts with: ${key.substring(0, 12)}...` });
+});
+
 app.listen(PORT, () => {
+  const key = process.env.ANTHROPIC_API_KEY;
   console.log(`Energise FRA App running on port ${PORT}`);
+  console.log(`API key status: ${key ? 'SET (starts with ' + key.substring(0, 12) + '...)' : 'NOT SET — add ANTHROPIC_API_KEY in Railway Variables'}`);
 });
