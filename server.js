@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
-const Jimp = require('jimp');
+const { Jimp, JimpMime } = require('jimp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -138,11 +138,12 @@ app.post('/api/analyse', upload.array('photos', 10), async (req, res) => {
       try {
         const img = await Jimp.read(file.buffer);
         // Scale down if wider/taller than 1600px
-        if (img.getWidth() > 1600 || img.getHeight() > 1600) {
-          img.scaleToFit(1600, 1600);
+        if (img.width > 1600 || img.height > 1600) {
+          img.scaleToFit({ w: 1600, h: 1600 });
         }
         // Export as JPEG at 80% quality
-        const resized = await img.getBufferAsync(Jimp.MIME_JPEG);
+        img.quality = 80;
+        const resized = await img.getBuffer(JimpMime.jpeg);
         return {
           type: 'image',
           source: { type: 'base64', media_type: 'image/jpeg', data: resized.toString('base64') }
@@ -191,8 +192,9 @@ app.post('/api/analyse', upload.array('photos', 10), async (req, res) => {
     res.json({ success: true, result });
 
   } catch (err) {
-    console.error('Analysis error:', err);
-    res.status(500).json({ error: err.message || 'Analysis failed' });
+    console.error('Analysis error full:', err);
+    const msg = err?.error?.message || err?.message || JSON.stringify(err) || 'Analysis failed';
+    res.status(500).json({ error: msg, stack: err?.stack?.split('\n')[0] });
   }
 });
 
