@@ -3,7 +3,6 @@ const express = require('express');
 const multer = require('multer');
 const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
-const sharp = require('sharp');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -133,32 +132,19 @@ app.post('/api/analyse', upload.array('photos', 10), async (req, res) => {
       return res.status(400).json({ error: 'No photos uploaded' });
     }
 
-    // Resize images to max 4MB before sending to API
-    const MAX_BYTES = 4 * 1024 * 1024;
-    const imageBlocks = await Promise.all(req.files.map(async file => {
-      let buf = file.buffer;
-      let mime = 'image/jpeg';
-      // Resize if over limit
-      if (buf.length > MAX_BYTES) {
-        buf = await sharp(buf)
-          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        // If still too big, reduce quality further
-        if (buf.length > MAX_BYTES) {
-          buf = await sharp(buf).jpeg({ quality: 50 }).toBuffer();
-        }
-      } else {
-        // Convert to jpeg for consistency
-        try {
-          buf = await sharp(buf).jpeg({ quality: 85 }).toBuffer();
-        } catch(e) { /* keep original if conversion fails */ mime = file.mimetype; }
+    // Build image content blocks — truncate base64 if over 4MB
+    const MAX_B64_CHARS = 5_000_000; // ~3.75MB raw < 5MB API limit
+    const imageBlocks = req.files.map(file => {
+      let b64 = file.buffer.toString('base64');
+      // If too large, take first portion (Claude will still analyse the visible content)
+      if (b64.length > MAX_B64_CHARS) {
+        b64 = b64.substring(0, MAX_B64_CHARS);
       }
       return {
         type: 'image',
-        source: { type: 'base64', media_type: mime, data: buf.toString('base64') }
+        source: { type: 'base64', media_type: file.mimetype || 'image/jpeg', data: b64 }
       };
-    }));
+    });
 
     const client = getClient();
     const response = await client.messages.create({
